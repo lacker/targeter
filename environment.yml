@@ -1,0 +1,37 @@
+name: targeter
+channels:
+  - anaconda
+  - defaults
+dependencies:
+  - astropy=4.0.2=py38h7b6447c_0
+  - blas=1.0=mkl
+  - ca-certificates=2020.10.14=0
+  - certifi=2020.6.20=py38_0
+  - intel-openmp=2021.2.0=h06a4308_610
+  - ld_impl_linux-64=2.33.1=h53a641e_7
+  - libedit=3.1.20191231=h14c3975_1
+  - libffi=3.3=he6710b0_2
+  - libgcc-ng=9.1.0=hdf63c60_0
+  - libgfortran-ng=7.3.0=hdf63c60_0
+  - libstdcxx-ng=9.1.0=hdf63c60_0
+  - mkl=2021.2.0=h06a4308_296
+  - mkl-service=2.3.0=py38h27cfd23_1
+  - mkl_fft=1.3.0=py38h42c9631_2
+  - mkl_random=1.2.1=py38ha9443f7_2
+  - ncurses=6.2=he6710b0_1
+  - numpy=1.20.2=py38h2d18471_0
+  - numpy-base=1.20.2=py38hfae3a4d_0
+  - openssl=1.1.1h=h7b6447c_0
+  - pip=20.2.4=py38_0
+  - python=3.8.5=h7579374_1
+  - readline=8.0=h7b6447c_0
+  - redis-py=3.5.3=py_0
+  - scipy=1.6.2=py38had2a1c9_1
+  - setuptools=50.3.0=py38hb0f4dca_1
+  - six=1.15.0=py_0
+  - sqlite=3.33.0=h62c20be_0
+  - tk=8.6.10=hbc83047_0
+  - wheel=0.35.1=py_0
+  - xz=5.2.5=h7b6447c_0
+  - zlib=1.2.11=h7b6447c_3
+prefix: /home/lacker/miniconda3/envs/targeter
