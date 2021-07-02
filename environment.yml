@@ -34,4 +34,8 @@ dependencies:
   - wheel=0.35.1=py_0
   - xz=5.2.5=h7b6447c_0
   - zlib=1.2.11=h7b6447c_3
+  - pip:
+    - cffi==1.14.5
+    - mip==1.13.0
+    - pycparser==2.20
 prefix: /home/lacker/miniconda3/envs/targeter
