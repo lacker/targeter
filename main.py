@@ -15,24 +15,49 @@ TARGET_LIST = json.loads(REDIS.get("array_1:current_obs:target_list"))
 RADIUS = 0.5 * ((2.998e8 / float(FREQUENCY)) / 1000) * 180 / math.pi
 
 
-class Point(object):
-    def __init__(self, source_id, ra, decl, priority):
+class Target(object):
+    """
+    We give each point an index based on its ordinal position in our input.
+    Otherwise the data is precisely the data provided in redis.
+    """
+
+    def __init__(self, index, source_id, ra, decl, priority):
+        self.index = index
         self.source_id = source_id
         self.ra = ra
         self.decl = decl
         self.priority = priority
 
 
-# Parse the json into Point objects for convenience
-POINTS = [
-    Point(*args)
-    for args in zip(
-        TARGET_LIST["source_id"],
-        TARGET_LIST["ra"],
-        TARGET_LIST["decl"],
-        TARGET_LIST["priority"],
+# Parse the json into Target objects for convenience
+TARGETS = [
+    Target(index, *args)
+    for (index, args) in enumerate(
+        zip(
+            TARGET_LIST["source_id"],
+            TARGET_LIST["ra"],
+            TARGET_LIST["decl"],
+            TARGET_LIST["priority"],
+        )
     )
 ]
+
+
+class Circle(object):
+    """
+    A circle along with the set of Targets that is within it.
+    """
+
+    def __init__(self, ra, decl, targets):
+        self.ra = ra
+        self.decl = decl
+        self.targets = targets
+
+    def key(self):
+        """
+        A tuple key encoding the targets list.
+        """
+        return tuple(t.index for t in self.targets)
 
 
 def intersect_two_circles(x0, y0, r0, x1, y1, r1):
@@ -70,62 +95,63 @@ def intersect_two_circles(x0, y0, r0, x1, y1, r1):
 
 
 def main():
-    arr = np.array([[p.ra, p.decl] for p in POINTS])
+    arr = np.array([[t.ra, t.decl] for t in TARGETS])
     tree = KDTree(arr)
 
-    # Find all pairs of points that could be captured by a single observation
+    # Find all pairs of targets that could be captured by a single observation
     pairs = tree.query_pairs(2 * RADIUS)
     print("there are", len(pairs), "pairs")
 
     # A list of (ra, decl) coordinates for the center of possible circles
     candidate_centers = []
 
-    # Add one center for each of the points that aren't part of any pairs
+    # Add one center for each of the targets that aren't part of any pairs
     in_a_pair = set()
     for i, j in pairs:
         in_a_pair.add(i)
         in_a_pair.add(j)
-    for i in range(len(POINTS)):
+    for i in range(len(TARGETS)):
         if i not in in_a_pair:
-            p = POINTS[i]
-            candidate_centers.append((p.ra, p.decl))
+            t = TARGETS[i]
+            candidate_centers.append((t.ra, t.decl))
 
-    # Add a center for each pair of points that are close to each other
+    # Add two centers for each pair of targets that are close to each other
     for i0, i1 in pairs:
-        p0 = POINTS[i0]
-        p1 = POINTS[i1]
+        t0 = TARGETS[i0]
+        t1 = TARGETS[i1]
         # For each pair, find two points that are a bit less than RADIUS away from each point.
         # These are the possible centers of the circle.
         # TODO: make the mathematical argument of this algorithm's sufficiency clearer
         r = 0.9999 * RADIUS
         try:
-            c0, c1 = intersect_two_circles(p0.ra, p0.decl, r, p1.ra, p1.decl, r)
+            c0, c1 = intersect_two_circles(t0.ra, t0.decl, r, t1.ra, t1.decl, r)
             candidate_centers.append(c0)
             candidate_centers.append(c1)
         except ValueError:
             continue
 
-    # For each circle-center, find the member points in it
+    # For each circle-center, find the target points in it
     print("there are", len(candidate_centers), "candidates for circle-centers")
-    candidate_members = tree.query_ball_point(
+    candidate_target_indexes = tree.query_ball_point(
         candidate_centers, RADIUS, return_sorted=True
     )
 
-    # Filter out any candidates whose members are the same as a previous candidate
-    centers = []
-    members = []
+    # Construct Circle objects.
+    # Filter out any circles whose included targets are the same as a previous circle
+    circles = []
     seen = set()
-    for c, member_list in zip(candidate_centers, candidate_members):
-        key = tuple(member_list)
+    for (ra, decl), target_indexes in zip(candidate_centers, candidate_target_indexes):
+        targets = [TARGETS[i] for i in target_indexes]
+        circle = Circle(ra, decl, targets)
+        key = circle.key()
         if key in seen:
             continue
         seen.add(key)
-        centers.append(c)
-        members.append(member_list)
+        circles.append(circle)
 
     print(
         "after removing functional duplicates, there are",
-        len(centers),
+        len(circles),
         "possible circles",
     )
 
