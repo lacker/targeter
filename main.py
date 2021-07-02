@@ -2,6 +2,7 @@
 
 import json
 import math
+import mip
 import numpy as np
 import redis
 from scipy.spatial import KDTree
@@ -165,6 +166,64 @@ def main():
         len(circles),
         "possible circles",
     )
+
+    # We want to pick the set of circles that covers the most targets.
+    # This is the "maximum coverage problem".
+    # https://en.wikipedia.org/wiki/Maximum_coverage_problem
+    # We encode this as an integer linear program.
+    model = mip.Model(sense=mip.MAXIMIZE)
+
+    # Variable t{n} is whether the nth target is covered
+    target_vars = [
+        model.add_var(name=f"t{n}", var_type=mip.BINARY) for n in range(len(TARGETS))
+    ]
+
+    # Variable c{n} is whether the nth circle is selected
+    circle_vars = [
+        model.add_var(name=f"c{n}", var_type=mip.BINARY) for n in range(len(circles))
+    ]
+
+    # Add a constraint that we must select at most 64 circles
+    model += mip.xsum(circle_vars) <= 64
+
+    # For each target, if its variable is 1 then at least one of its circles must also be 1
+    circles_for_target = {}
+    for (circle_index, circle) in enumerate(circles):
+        for target in circle.targets:
+            if target.index not in circles_for_target:
+                circles_for_target[target.index] = []
+            circles_for_target[target.index].append(circle_index)
+    for target_index, circle_indexes in circles_for_target.items():
+        cvars = [circle_vars[i] for i in circle_indexes]
+        model += mip.xsum(cvars) >= target_vars[target_index]
+
+    # Maximize the number of targets we observe
+    model.objective = mip.xsum(target_vars)
+
+    # Optimize
+    status = model.optimize(max_seconds=30)
+    if status == mip.OptimizationStatus.OPTIMAL:
+        print("optimal solution found")
+    elif status == mip.OptimizationStatus.FEASIBLE:
+        print("feasible solution found")
+    else:
+        print("no solution found. this is probably a bug.")
+        return
+
+    selected_circles = []
+    for circle, circle_var in zip(circles, circle_vars):
+        if circle_var.x > 1e-6:
+            selected_circles.append(circle)
+
+    selected_targets = []
+    for target, target_var in zip(TARGETS, target_vars):
+        if target_var.x > 1e-6:
+            selected_targets.append(target)
+
+    print(f"{len(selected_targets)} targets can be observed:")
+    for circle in selected_circles:
+        target_str = ", ".join(t.source_id for t in circle.targets)
+        print(f"circle ({circle.ra}, {circle.decl}) contains targets {target_str}")
 
 
 if __name__ == "__main__":
