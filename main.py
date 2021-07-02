@@ -80,6 +80,17 @@ def main():
     # A list of (ra, decl) coordinates for the center of possible circles
     candidate_centers = []
 
+    # Add one center for each of the points that aren't part of any pairs
+    in_a_pair = set()
+    for i, j in pairs:
+        in_a_pair.add(i)
+        in_a_pair.add(j)
+    for i in range(len(POINTS)):
+        if i not in in_a_pair:
+            p = POINTS[i]
+            candidate_centers.append((p.ra, p.decl))
+
+    # Add a center for each pair of points that are close to each other
     for i0, i1 in pairs:
         p0 = POINTS[i0]
         p1 = POINTS[i1]
@@ -94,22 +105,23 @@ def main():
         except ValueError:
             continue
 
+    # For each circle-center, find the member points in it
     print("there are", len(candidate_centers), "candidates for circle-centers")
-    candidate_neighbors = tree.query_ball_point(
+    candidate_members = tree.query_ball_point(
         candidate_centers, RADIUS, return_sorted=True
     )
 
-    # Filter out any candidates whose neighbors are the same as a previous candidate
+    # Filter out any candidates whose members are the same as a previous candidate
     centers = []
-    neighbors = []
+    members = []
     seen = set()
-    for c, neighbor_list in zip(candidate_centers, candidate_neighbors):
-        key = tuple(neighbor_list)
+    for c, member_list in zip(candidate_centers, candidate_members):
+        key = tuple(member_list)
         if key in seen:
             continue
         seen.add(key)
         centers.append(c)
-        neighbors.append(neighbor_list)
+        members.append(member_list)
 
     print(
         "after removing functional duplicates, there are",
