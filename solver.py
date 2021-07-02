@@ -235,8 +235,7 @@ class Solver:
         elif status == mip.OptimizationStatus.FEASIBLE:
             self.log("Feasible solution found.")
         else:
-            self.log("No solution found. This is probably a bug.")
-            return
+            raise RuntimeError("No solution found. This is probably a bug.")
 
         selected_circles = []
         for circle, circle_var in zip(circles, circle_vars):
