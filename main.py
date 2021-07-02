@@ -114,132 +114,155 @@ def intersect_two_circles(x0, y0, r0, x1, y1, r1):
     return ((x3, y3), (x4, y4))
 
 
-def main():
-    arr = np.array([[t.ra, t.decl] for t in TARGETS])
-    tree = KDTree(arr)
+class Solver:
+    def __init__(self, verbose):
+        self.verbose = verbose
 
-    # Find all pairs of targets that could be captured by a single observation
-    pairs = tree.query_pairs(2 * RADIUS)
-    print("there are", len(pairs), "pairs")
+    def log(self, *args):
+        if not self.verbose:
+            return
+        print(*args)
 
-    # A list of (ra, decl) coordinates for the center of possible circles
-    candidate_centers = []
+    def solve(self):
+        """
+        Return an optimal list of Circle objects.
+        """
+        arr = np.array([[t.ra, t.decl] for t in TARGETS])
+        tree = KDTree(arr)
 
-    # Add one center for each of the targets that aren't part of any pairs
-    in_a_pair = set()
-    for i, j in pairs:
-        in_a_pair.add(i)
-        in_a_pair.add(j)
-    for i in range(len(TARGETS)):
-        if i not in in_a_pair:
-            t = TARGETS[i]
-            candidate_centers.append((t.ra, t.decl))
+        # Find all pairs of targets that could be captured by a single observation
+        pairs = tree.query_pairs(2 * RADIUS)
+        self.log("there are", len(pairs), "pairs")
 
-    # Add two centers for each pair of targets that are close to each other
-    for i0, i1 in pairs:
-        t0 = TARGETS[i0]
-        t1 = TARGETS[i1]
-        # For each pair, find two points that are a bit less than RADIUS away from each point.
-        # These are the possible centers of the circle.
-        # TODO: make the mathematical argument of this algorithm's sufficiency clearer
-        r = 0.9999 * RADIUS
-        try:
-            c0, c1 = intersect_two_circles(t0.ra, t0.decl, r, t1.ra, t1.decl, r)
-            candidate_centers.append(c0)
-            candidate_centers.append(c1)
-        except ValueError:
-            continue
+        # A list of (ra, decl) coordinates for the center of possible circles
+        candidate_centers = []
 
-    # For each circle-center, find the target points in it
-    print("there are", len(candidate_centers), "candidates for circle-centers")
-    candidate_target_indexes = tree.query_ball_point(
-        candidate_centers, RADIUS, return_sorted=True
-    )
+        # Add one center for each of the targets that aren't part of any pairs
+        in_a_pair = set()
+        for i, j in pairs:
+            in_a_pair.add(i)
+            in_a_pair.add(j)
+        for i in range(len(TARGETS)):
+            if i not in in_a_pair:
+                t = TARGETS[i]
+                candidate_centers.append((t.ra, t.decl))
 
-    # Construct Circle objects.
-    # Filter out any circles whose included targets are the same as a previous circle
-    circles = []
-    seen = set()
-    for (ra, decl), target_indexes in zip(candidate_centers, candidate_target_indexes):
-        targets = [TARGETS[i] for i in target_indexes]
-        circle = Circle(ra, decl, targets)
-        key = circle.key()
-        if key in seen:
-            continue
-        seen.add(key)
-        circles.append(circle)
+        # Add two centers for each pair of targets that are close to each other
+        for i0, i1 in pairs:
+            t0 = TARGETS[i0]
+            t1 = TARGETS[i1]
+            # For each pair, find two points that are a bit less than RADIUS away from each point.
+            # These are the possible centers of the circle.
+            # TODO: make the mathematical argument of this algorithm's sufficiency clearer
+            r = 0.9999 * RADIUS
+            try:
+                c0, c1 = intersect_two_circles(t0.ra, t0.decl, r, t1.ra, t1.decl, r)
+                candidate_centers.append(c0)
+                candidate_centers.append(c1)
+            except ValueError:
+                continue
 
-    print(
-        "after removing functional duplicates, there are",
-        len(circles),
-        "possible circles",
-    )
+        # For each circle-center, find the target points in it
+        self.log("there are", len(candidate_centers), "candidates for circle-centers")
+        candidate_target_indexes = tree.query_ball_point(
+            candidate_centers, RADIUS, return_sorted=True
+        )
 
-    # We want to pick the set of circles that covers the most targets.
-    # This is the "maximum coverage problem".
-    # https://en.wikipedia.org/wiki/Maximum_coverage_problem
-    # We encode this as an integer linear program.
-    model = mip.Model(sense=mip.MAXIMIZE)
+        # Construct Circle objects.
+        # Filter out any circles whose included targets are the same as a previous circle
+        circles = []
+        seen = set()
+        for (ra, decl), target_indexes in zip(
+            candidate_centers, candidate_target_indexes
+        ):
+            targets = [TARGETS[i] for i in target_indexes]
+            circle = Circle(ra, decl, targets)
+            key = circle.key()
+            if key in seen:
+                continue
+            seen.add(key)
+            circles.append(circle)
 
-    # Variable t{n} is whether the nth target is covered
-    target_vars = [
-        model.add_var(name=f"t{n}", var_type=mip.BINARY) for n in range(len(TARGETS))
-    ]
+        self.log(
+            "after removing functional duplicates, there are",
+            len(circles),
+            "possible circles",
+        )
 
-    # Variable c{n} is whether the nth circle is selected
-    circle_vars = [
-        model.add_var(name=f"c{n}", var_type=mip.BINARY) for n in range(len(circles))
-    ]
+        # We want to pick the set of circles that covers the most targets.
+        # This is the "maximum coverage problem".
+        # https://en.wikipedia.org/wiki/Maximum_coverage_problem
+        # We encode this as an integer linear program.
+        model = mip.Model(sense=mip.MAXIMIZE)
+        if not self.verbose:
+            model.verbose = 0
 
-    # Add a constraint that we must select at most 64 circles
-    model += mip.xsum(circle_vars) <= 64
+        # Variable t{n} is whether the nth target is covered
+        target_vars = [
+            model.add_var(name=f"t{n}", var_type=mip.BINARY)
+            for n in range(len(TARGETS))
+        ]
 
-    # For each target, if its variable is 1 then at least one of its circles must also be 1
-    circles_for_target = {}
-    for (circle_index, circle) in enumerate(circles):
-        for target in circle.targets:
-            if target.index not in circles_for_target:
-                circles_for_target[target.index] = []
-            circles_for_target[target.index].append(circle_index)
-    for target_index, circle_indexes in circles_for_target.items():
-        cvars = [circle_vars[i] for i in circle_indexes]
-        model += mip.xsum(cvars) >= target_vars[target_index]
+        # Variable c{n} is whether the nth circle is selected
+        circle_vars = [
+            model.add_var(name=f"c{n}", var_type=mip.BINARY)
+            for n in range(len(circles))
+        ]
 
-    # Maximize the total score for targets we observe
-    model.objective = mip.xsum(
-        t.score * tvar for (t, tvar) in zip(TARGETS, target_vars)
-    )
+        # Add a constraint that we must select at most 64 circles
+        model += mip.xsum(circle_vars) <= 64
 
-    # Optimize
-    status = model.optimize(max_seconds=30)
-    if status == mip.OptimizationStatus.OPTIMAL:
-        print("optimal solution found")
-    elif status == mip.OptimizationStatus.FEASIBLE:
-        print("feasible solution found")
-    else:
-        print("no solution found. this is probably a bug.")
-        return
+        # For each target, if its variable is 1 then at least one of its circles must also be 1
+        circles_for_target = {}
+        for (circle_index, circle) in enumerate(circles):
+            for target in circle.targets:
+                if target.index not in circles_for_target:
+                    circles_for_target[target.index] = []
+                circles_for_target[target.index].append(circle_index)
+        for target_index, circle_indexes in circles_for_target.items():
+            cvars = [circle_vars[i] for i in circle_indexes]
+            model += mip.xsum(cvars) >= target_vars[target_index]
 
-    selected_circles = []
-    for circle, circle_var in zip(circles, circle_vars):
-        if circle_var.x > 1e-6:
-            selected_circles.append(circle)
+        # Maximize the total score for targets we observe
+        model.objective = mip.xsum(
+            t.score * tvar for (t, tvar) in zip(TARGETS, target_vars)
+        )
 
-    selected_targets = []
-    for target, target_var in zip(TARGETS, target_vars):
-        if target_var.x > 1e-6:
-            selected_targets.append(target)
+        # Optimize
+        status = model.optimize(max_seconds=30)
+        if status == mip.OptimizationStatus.OPTIMAL:
+            self.log("Optimal solution found.")
+        elif status == mip.OptimizationStatus.FEASIBLE:
+            self.log("Feasible solution found.")
+        else:
+            self.log("No solution found. This is probably a bug.")
+            return
 
-    print(f"The solution observes {len(selected_targets)} targets.")
-    pcount = {}
-    for t in selected_targets:
-        pcount[t.priority] = pcount.get(t.priority, 0) + 1
-    for p, count in sorted(pcount.items()):
-        print(f"{count} of the targets have priority {p}.")
-    for circle in selected_circles:
-        target_str = ", ".join(t.source_id for t in circle.targets)
-        print(f"circle ({circle.ra}, {circle.decl}) contains targets {target_str}")
+        selected_circles = []
+        for circle, circle_var in zip(circles, circle_vars):
+            if circle_var.x > 1e-6:
+                selected_circles.append(circle)
+
+        selected_targets = []
+        for target, target_var in zip(TARGETS, target_vars):
+            if target_var.x > 1e-6:
+                selected_targets.append(target)
+
+        self.log(f"The solution observes {len(selected_targets)} targets.")
+        pcount = {}
+        for t in selected_targets:
+            pcount[t.priority] = pcount.get(t.priority, 0) + 1
+        for p, count in sorted(pcount.items()):
+            self.log(f"{count} of the targets have priority {p}.")
+        for circle in selected_circles:
+            target_str = ", ".join(t.source_id for t in circle.targets)
+            self.log(
+                f"circle ({circle.ra}, {circle.decl}) contains targets {target_str}"
+            )
+
+        return selected_circles
 
 
 if __name__ == "__main__":
-    main()
+    s = Solver(True)
+    s.solve()
