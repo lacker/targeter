@@ -5,6 +5,7 @@ import math
 import numpy as np
 import redis
 from scipy.spatial import KDTree
+import smallestenclosingcircle
 
 REDIS = redis.Redis(host="localhost", port=6379, db=0)
 
@@ -52,12 +53,22 @@ class Circle(object):
         self.ra = ra
         self.decl = decl
         self.targets = targets
+        self.recenter()
 
     def key(self):
         """
         A tuple key encoding the targets list.
         """
         return tuple(t.index for t in self.targets)
+
+    def recenter(self):
+        """
+        Alter ra and decl to minimize the maximum distance to any point.
+        """
+        points = [(t.ra, t.decl) for t in self.targets]
+        x, y, r = smallestenclosingcircle.make_circle(points)
+        assert r < RADIUS
+        self.ra, self.decl = x, y
 
 
 def intersect_two_circles(x0, y0, r0, x1, y1, r1):
