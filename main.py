@@ -16,6 +16,9 @@ TARGET_LIST = json.loads(REDIS.get("array_1:current_obs:target_list"))
 
 RADIUS = 0.5 * ((2.998e8 / float(FREQUENCY)) / 1000) * 180 / math.pi
 
+# One target of priority n is worth PRIORITY_DECAY targets of priority n+1.
+PRIORITY_DECAY = 10
+
 
 class Target(object):
     """
@@ -29,6 +32,11 @@ class Target(object):
         self.ra = ra
         self.decl = decl
         self.priority = priority
+
+        # Targets with a lower priority have a higher score.
+        # We are maximizing score of all targets.
+        # The maximum priority is 7.
+        self.score = int(PRIORITY_DECAY ** (7 - self.priority))
 
 
 # Parse the json into Target objects for convenience
@@ -197,8 +205,10 @@ def main():
         cvars = [circle_vars[i] for i in circle_indexes]
         model += mip.xsum(cvars) >= target_vars[target_index]
 
-    # Maximize the number of targets we observe
-    model.objective = mip.xsum(target_vars)
+    # Maximize the total score for targets we observe
+    model.objective = mip.xsum(
+        t.score * tvar for (t, tvar) in zip(TARGETS, target_vars)
+    )
 
     # Optimize
     status = model.optimize(max_seconds=30)
@@ -220,7 +230,12 @@ def main():
         if target_var.x > 1e-6:
             selected_targets.append(target)
 
-    print(f"{len(selected_targets)} targets can be observed:")
+    print(f"The solution observes {len(selected_targets)} targets.")
+    pcount = {}
+    for t in selected_targets:
+        pcount[t.priority] = pcount.get(t.priority, 0) + 1
+    for p, count in sorted(pcount.items()):
+        print(f"{count} of the targets have priority {p}.")
     for circle in selected_circles:
         target_str = ", ".join(t.source_id for t in circle.targets)
         print(f"circle ({circle.ra}, {circle.decl}) contains targets {target_str}")
